@@ -1,0 +1,337 @@
+Tabela do Campeonato Brasileiro
+
+Classificação Geral - Tabela com posição, time, pontos, jogos, vitórias, derrotas, empates, Gols pró, Gols contra, Saldo Gols, Aproveitamento %
+Gráfico de Gols Pró x Gols Contra
+Gráfico de Gols Dentro de Casa x Gols Fora de Casa
+
+
+
+Filtros:
+	Rodada incial à Rodada Final (Escolher nº das rodadas)
+	Mando de campo: Mandante
+			Visitante
+
+
+#1 Tratamento de Dados (ETL - Extract, Transform, Load  / Extrair, Transformar e Carregar)
+
+Abrir um arquivo em branco
+Importar os dados
+	Importar base do excel BR2021
+	Selecionar tabelas Equipes e Jogos e transformar dados
+Analisar a Estrutura dos dados para tratamento
+
+Tabela Equipe: Tabela dimensão com as informações das equipes como sigla e escudo do time em link
+	Usar a primeira linha como cabeçalho
+	
+
+Tabela Jogos: 	Informações de todos os jogos que aconteceram
+		Dica: Deixar somente as informações pertinentes à esta dimensão
+		Informações de Local, Equipes que jogaram, Data e Hora, Placares, Estádio, Cidade
+		
+
+	1) Duplicar a tabela de Jogos e Chamar de Resultados
+	2) Na tabela Jogos, deixar somente ID do Jogo, Rodada, Data, Horário, Estádio e Cidade (Dados dimensão dos jogos)
+	3) Criar a tabela de resultados e vincular com o ID do Jogo (Relacionamento)
+	4) Na tabela Resultados:
+		Adicionar Coluna> Coluna Personalizada
+		Nomear como resultado
+
+		Criar um dicionário {} com 2 Registros []:
+
+{[
+
+equipe_id = [equipe1],  	//Coluna que será criada com a equipe mandante
+sg = [placar1]-[placar2],	//Saldo de gols: Placar time 1 - Placar time 2
+gp = [placar1],			//Gols pró: Núm. de gols feitos pelo time 1
+gc = [placar2],			//Gols contra: Núm. de gols sofridos do time 1 = gols do time 2
+p = if sg = 0 then 1 else if sg > 0 then 3 else 0,	// pontos= Se saldo de gols = 0 então empate (1 ponto), senão se for maior que 0 então (vitória) 3 pontos senão derrota (0 pontos)
+mando = "mandante"		//Classificação deste item como mandante
+
+],
+[
+
+equipe_id = [equipe2],		//Idem anterior porém, invertendo as equipes
+sg = [placar2]-[placar1],	//Idem anterior porém, invertendo as equipes
+gp = [placar2],			//Idem anterior porém, invertendo as equipes
+gc = [placar1],			//Idem anterior porém, invertendo as equipes
+p = if sg = 0 then 1 else if sg > 0 then 3 else 0,
+mando = "visitante"		//Classificação deste item como visitante
+
+]
+}
+
+
+Clicar com botão direito em ID_Jogo e Resultado *(Nova coluna criada) e remover outras colunas
+Expandir resultado para novas linhas (o dicionário vai ser expandido para listas RECORD na coluna)
+	Para cada jogo teremos 2 linhas, um para mandante e outro para visitante
+Expandir resultados (desmarcar prefixo)
+	Obs: Se eu quiser saber o número de pontos de um time, basta somar a coluna P, ou gols na coluna GP, etc...
+
+Selecionar todas as colunas > Transformar > Detectar tipos de dados
+Fechar e Aplicar
+
+
+RELACIONAMENTOS: Avaliar se as 3 tabelas se relacionam
+
+
+
+#2 Cálculos e Criação de Medidas
+
+Calcular métricas necessárias para a nossa análise: Saldo de Gols, Pontuação, etc...
+
+Página Inicial > Inserir dados > Criar uma tabela vazia
+Nomear a tabela como Medidas e clicar em Carregar
+
+Botão direito no campo Medidas > Inserir Nova Medida
+Ocultar a tabela vazia do campo medidas
+
+P (Pontos) = SUM(resultados[p])
+J (Jogos) = DISTINCTCOUNT*(resultados[jogo_id])
+		J (Jogos) = COUNTROWS(Jogos) // fazendo assim, vai sempre trazer a quantidade total de jogos no campeonato, e não de cada equipe. Isso se dá por causa do direcionamento dos relacionamentos
+
+GP (Gols Pró) = SUM(resultados[gp])
+GC (Gols Contra) = SUM(resultados[gc])
+SG (Saldo Gols) = SUM(resultados[sg])
+% Aproveitamento = DIVIDE([P (Pontos)], ([J (Jogos)] * 3), "-"
+	Formatar % com 1 casa após a vírgula. Explicação: Quantos pontos um time fez em relação ao total de pontos que poderia ter feito (nº de jogos x 3 pontos)
+	Usar divide para o Aproveitamento, assim, nas primeiras rodadas o valor não vai dar erro
+
+-------------------
+V (Vitórias) = 
+CALCULATE(
+    [J (Jogos)],
+    FILTER(
+        resultados,
+        [p] = 3
+    )
+)
+-------------------
+E (Empates) = 
+CALCULATE(
+    [J (Jogos)],
+    FILTER(
+        resultados,
+        [p] = 1
+    )
+)
+-------------------
+D (Derrotas) = 
+CALCULATE(
+    [J (Jogos)],
+    FILTER(
+        resultados,
+        [p] = 0
+    )
+)
+
+-------------------
+GM (Gols Mandante) = 
+CALCULATE(
+    [GP (Gols Pró)],
+    FILTER(
+        resultados,
+        resultados[mando] = "mandante"
+    )
+)
+
+-------------------
+GV (Gols Visitante) = 
+CALCULATE(
+    [GP (Gols Pró)],
+    FILTER(
+        resultados,
+        resultados[mando] = "visitante"
+    )
+)
+
+-------------------
+
+A medida mais complexa é a posição, pois é um ranking que precisa seguir os critérios de desempate do regulamento do campeonato
+
+Critérios de Ranking para desempate
+1) Nº de Pontos
+2) Nº de Vitórias
+3) Saldo de Gols
+4) Gols Pró
+
+Criar nova
+Classificação =
+RANKX(		//devo remover todos os filtros pois não pode ser considerado a posição na tabela da maneira atual)
+	ALL(equipes),
+	[P (Pontos)] * 10 ^ 9 +
+	[V (Vitórias)] * 10 ^ 6 +
+	[SG (Saldo Gols)] * 10 ^ 3 +
+	[GP (Gols Pró)]
+)
+
+
+#3 Elaboração da Parte Visual
+
+Colocar imagem de referência do Dashboard como "Papel de Parede"
+Colocar a Matriz com os dados do Ranking, Pontos, Vitórias, Saldo de Gols, etc.. no local da página reservado
+Trocar o nome das equipes pelos escudos
+	Clicar na matriz
+	Remover o campo equipe
+		Antes de colocar o escudo, selecione este item em campos
+		Menu Formato na faixa de opções > Categoria de Dados > URL da Imagem
+Formatar o visual
+	Remover pre-definições de estilo
+	Altura da imagem = 24
+	Geral Efeitos = Desmarcar tela de fundo
+	Visual Cabeçalho da coluna = Cor branca
+	Valore = Cor branca para o campo primário e alternativo
+	Subtotais de linha = Desmarcar
+	Subtotais de coluna = Desmarcar
+
+Renomear campos
+	escudo = Time
+	Classificação = #	
+	P (Pontos) = P
+	J (Jogos) = J
+	V (Vitórias) = V 
+	E (Empates) = E
+	D (Derrotas) = D
+	SG (Saldo Gols) = SG 
+	GP (Gols Pró) = GP
+	GC (Gols Contra) = GC 
+	% Aproveitamento = %
+	
+Alterar formato de matriz para tabela, assim podemos colocar a classificação antes do escudo do time
+
+Visuais da Tabela
+	Totais = Desabilitar
+	Grade = Desmarcar linhas de grade
+	Grade > Opções > Preenchimento da linha = Ajustar para caber no quadro
+
+
+FILTROS
+
+Segmentador de dados > encaixar no espaço ao lado da tabela
+	Trazer Rodadas para este segmentador
+	Visual > Geral > Efeitos = Tirar tela fundo
+	Visual > Cabeçalho = Cor branca
+	Valores > Tela de fundo > Azul mais escuro
+	Valores > Cor da fonte = Branco
+
+Segmentador de dados > 
+	Trazer Mando de Campo para este segmentador
+	Trazer as definições de visual do outro segmentador para este (Usar pincel)
+	Configurações de Segmentação > Seleção > Seleção Múltipla sem a Tecla Control = Desmarcar
+	Valores = Cor da fonte = Branca
+	Valores = Tela de Fundo = Azul mais escuro
+
+
+GRÁFICO DE GOLS PRÓ X CONTRA
+
+Gráfico de Barras Empilhadas
+	Eixo = Equipes
+	Criar nova medida de para Gols Contra como Negativo
+		-GC = -[GC (Gols Contra)]
+		Clicar no campo de Modelo (ligação entre tabelas)
+		Formato > Personalizado e colocar no campo abaixo 0;0;0
+
+	Valores = Colocar GP (Gols Pró) e -GC
+	Alterar os Nomes
+
+	Formatação > Visual > Geral > Efeitos > Tela de fundo = Desmarcar
+	Visual > Eixo Y > Valores > Cor Branca e Desativar Título
+	Visual > Eixo X > Desativar
+	Visual > Rótulo de Dados > Ativar
+	Geral > Título = Desmarcar
+	Visual > Legenda > Texto = Branco
+	Visual > Barras > alterar cor das barras Verde para GP e Vermelho para GC
+	
+Colocar #Classificação nas dicas de ferramenta
+
+Clicar nos 3 pontinhos e classificar Eixo
+	Ordenar pela Classificação Crescente
+
+
+GRÁFICO DE DISPERSÃO
+	Valores = equipe_id
+	Eixo X = GM (Gols Mandante)
+	Eixo Y = GV (Gols Visitante)
+
+Pegar a formatação do gráfico anterior com o pincel
+	Formatação > Visual > Eixo Y = Ativar / Valores = Cor Branca / Título = Desativar
+	Formatação > Visual > Rótulo da Categoria = Ativar / Cor Branca
+	Formatação > Visual > Marcadores = Tamanho 2 e Cor Verde igual ao gráfico anterior
+
+
+
+SUBSTITUIR FONTE DE DADOS EXCEL POR API PÚBLICA
+
+Conectar com API = TIMES
+	Remover Etapa Tipo Alterado da nova consulta
+	Renomear os cabeçalhos para ficar igual consulta Equipes
+	Selecionar todas as colunas > Detectar tipos de dados
+
+Substituir o código
+	Com a nova consulta selecionada, Vá em Página Inicial > Editor Avançado
+	Selecione todo o código e Copie
+	Feche o editor
+
+Selecione Equipes > Editor Avançado
+	Selecionar todo o código e Colar o anterior por cima
+
+Remover Consulta nova 2022
+
+Conectar com API = Tabela de Jogos
+	Repetir o procedimento feito com TIMES
+
+Remover Consulta nova 2022
+
+
+ADAPTAR TABELA DE RESULTADOS, POIS É PROVENIENTE DA TABELA DE JOGOS
+Duplicar tabela Jogos
+Apagar todas as etapas e deixar até Convertido para Tabela
+Expandir coluna Value (Tirar o Prefixo)
+Entrar no Editor Avançado
+Copiar as 3 linhas dentro do LET
+
+Abrir a tabela Resultados e clicar no Editor Avançado
+dê alguns 'Enters' no passo   #"Personalização Adicionada" = Table.AddColumn(#"Tipo Alterado", "resultado", each {[
+Cole o código copiado antes do #"Personalização Adicionada" =
+Coloque uma vírgula após a última linha colada (no final)
+
+
+Trocar o nome do passo de referência 
+
+DE: 	#"Personalização Adicionada" = Table.AddColumn(#"Tipo Alterado", "resultado", each {[
+PARA:	#"Personalização Adicionada" = Table.AddColumn(#"Value Expandido", "resultado", each {[
+
+
+Deletar o código que traz informações do Excel (Primeiras linhas)
+
+Caso der erro, vá até o passo anterior ao erro e ajuste o nome da coluna Name para jogo_id
+Selecione todas as colunas e faça a detecção do tipo automaticamente
+
+Mover a etapa Personalização Adicionada para depois de Tipo Alterado para eliminar os erros
+
+Filtrar coluna SG eliminando os Nulos 
+
+
+Apagar a Consulta Jogos (2)
+Fechar e Aplicar
+
+Clicar em Escudo > Categoria de Dados > Alterar para URL da Imagem
+
+Para casos de tabela iniciando, temos valores em branco. Para isso precisamos fazer ajustes
+	Relacionamento: De Resultados para Equipes o relacionamento deve ser Muitos : 1 em um único sentido
+		Isso quer dizer que 1 equipe pode ter vários resultados
+	Para os valores que aparecem em vazio.
+		Clicar na medida e acrescentar + 0 ao final da fórmula
+
+
+
+Acrescentar a Consulta de ANO
+
+Página Inicial > Parâmetro > Novo Parâmetro
+nome Ano
+tipo texto
+escrever 2020
+
+Nas fontes de dados das consultas, fazer a concatenação no endereço conforme a seguir
+= Json.Document(Web.Contents("https://api.databinteligencia.com.br/Brasileirao/equipes/" & ano))
+
+Assim, sempre que trocar o valor do ano no parâmetro, todas as consultas serão atualizadas
